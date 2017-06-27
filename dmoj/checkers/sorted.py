@@ -26,7 +26,7 @@ def check(process_output, judge_output, file=False,
         process_lines.sort()
         judge_lines.sort()
 
-    for process_token, judge_token in izip(process_lines, judge_lines):
-        if process_token != judge_token:
+    for process_tokens, judge_tokens in izip(process_lines, judge_lines):
+        if process_tokens != judge_tokens:
             return False
     return True

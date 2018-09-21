@@ -36,7 +36,7 @@ class GeneratorManager(object):
             '.c': executors.get('C', None),
             '.cpp': executors.get(find_runtime(('CPP14', 'CPP11', 'CPP0X', 'CPP03')), None),
             '.java': executors.get(find_runtime(('JAVA9', 'JAVA8', 'JAVA7')), None),
-            '.rb': executors.get(find_runtime(('RUBY21', 'RUBY19', 'RUBY18')), None)
+            '.rb': executors.get(find_runtime(('RUBY2', 'RUBY19', 'RUBY18')), None)
         }
         ext = os.path.splitext(filename)[1]
         pass_platform_flags = ['.c', '.cpp']
@@ -59,7 +59,7 @@ class GeneratorManager(object):
         except CompileError as err:
             # Strip ansi codes from CompileError message so we don't get wacky displays on the site like
             # 01m[K_generator.cpp:26:23:[m[K [01;31m[Kerror: [m[K'[01m[Kgets[m[K' was not declared in this scope
-            raise CompileError(ansi.strip_ansi(err.message))
+            raise CompileError(ansi.strip_ansi(err.args[0]))
 
         self._cache[cache_key] = executor
         return executor

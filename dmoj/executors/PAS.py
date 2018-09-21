@@ -6,9 +6,6 @@ class Executor(NullStdoutMixin, CompiledExecutor):
     ext = '.pas'
     name = 'PAS'
     command = 'fpc'
-    fs = ['/etc/timezone$']
-    syscalls = ['select']
-    command_paths = ['fpc']
     test_program = '''\
 var line : string;
 begin
@@ -21,8 +18,8 @@ end.
         return [self.get_command(), '-Fe/dev/stderr', '-So', '-O2', self._code]
 
     def get_compile_output(self, process):
-        output = process.communicate()[1]
-        return output if 'Fatal:' in output or 'Warning:' in output or 'Note:' in output else ''
+        output = super(Executor, self).get_compile_output(process)
+        return output if b'Fatal:' in output or b'Warning:' in output or b'Note:' in output else ''
 
     @classmethod
     def get_version_flags(cls, command):

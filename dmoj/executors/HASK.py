@@ -6,8 +6,6 @@ class Executor(NullStdoutMixin, CompiledExecutor):
     ext = '.hs'
     name = 'HASK'
     command = 'ghc'
-    command_paths = ['ghc']
-    syscalls = ['newselect', 'select']
     test_program = '''\
 main = do
     a <- getContents
@@ -15,4 +13,4 @@ main = do
 '''
 
     def get_compile_args(self):
-        return [self.get_command(), '-O', '-o', self.problem, self._code]
+        return [self.get_command(), '-O2', '-o', self.problem, self._code]

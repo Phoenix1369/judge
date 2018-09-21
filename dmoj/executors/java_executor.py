@@ -1,25 +1,26 @@
 import errno
-import subprocess
-import sys
 import os
 import re
+import subprocess
+import sys
 from shutil import copyfile
 from subprocess import Popen
 
+import six
+
 from dmoj.error import CompileError, InternalError
-from .base_executor import CompiledExecutor
 from dmoj.result import Result
+from dmoj.utils.unicode import utf8bytes, utf8text
+from .base_executor import CompiledExecutor
 
-recomment = re.compile(r'/\*.*?\*/', re.DOTALL)
-restring = re.compile(r''''(?:\\.|[^'\\])'|"(?:\\.|[^"\\])*"''', re.DOTALL)
-reinline_comment = re.compile(r'//.*?(?=[\r\n])')
-reclass = re.compile(r'\bpublic\s+(?:strictfp\s+)?(?:(?:abstract|final)\s+)?(?:strictfp\s+)?class\s+([_a-zA-Z\$][_0-9a-zA-z\$]*?)\b')
-repackage = re.compile(r'\bpackage\s+([^.;]+(?:\.[^.;]+)*?);')
-redeunicode = re.compile(r'\\u([0-9a-f]{4})', re.I)
-deunicode = lambda x: redeunicode.sub(lambda a: unichr(int(a.group(1), 16)), x)
+recomment = re.compile(r'/\*.*?\*/', re.DOTALL | re.U)
+restring = re.compile(r''''(?:\\.|[^'\\])'|"(?:\\.|[^"\\])*"''', re.DOTALL | re.U)
+reinline_comment = re.compile(r'//.*?(?=[\r\n])', re.U)
+reclass = re.compile(r'\bpublic\s+(?:strictfp\s+)?(?:(?:abstract|final)\s+)?(?:strictfp\s+)?class\s+([\w\$][\w\$]*?)\b', re.U)
+repackage = re.compile(r'\bpackage\s+([^.;]+(?:\.[^.;]+)*?);', re.U)
 
 
-JAVA_SANDBOX = os.path.abspath(os.path.join(os.path.dirname(__file__), 'java-sandbox.jar'))
+JAVA_SANDBOX = os.path.abspath(os.path.join(os.path.dirname(__file__), 'java_sandbox.jar'))
 
 POLICY_PREFIX = '''\
 grant codeBase "file:///{agent}" {{
@@ -49,6 +50,7 @@ class JavaExecutor(CompiledExecutor):
     vm = None
     compiler = None
     nproc = -1
+    address_grace = 786432
 
     jvm_regex = None
     security_policy = policy
@@ -89,9 +91,11 @@ class JavaExecutor(CompiledExecutor):
         agent_flags = '-javaagent:%s=policy:%s' % (self._agent_file, self._policy_file)
         for hint in self._hints:
             agent_flags += ',%s' % hint
+        if self.unbuffered:
+            agent_flags += ',nobuf'
         # 128m is equivalent to 1<<27 in Thread constructor
-        return ['java', '-client', agent_flags, '-Xss128m', '-Xmx%dK' % self.__memory_limit,
-                '-XX:ErrorFile=submission_jvm_crash.log', self._class_name]
+        return ['java', self.get_vm_mode(), agent_flags, '-Xss128m', '-Xmx%dK' % self.__memory_limit,
+                '-XX:+UseSerialGC', '-XX:ErrorFile=submission_jvm_crash.log', self._class_name]
 
     def launch(self, *args, **kwargs):
         self.__memory_limit = kwargs['memory']
@@ -99,7 +103,7 @@ class JavaExecutor(CompiledExecutor):
         return super(JavaExecutor, self).launch(*args, **kwargs)
 
     def launch_unsafe(self, *args, **kwargs):
-        return Popen(['java', '-client', self._class_name] + list(args),
+        return Popen(['java', self.get_vm_mode(), self._class_name] + list(args),
                      executable=self.get_vm(), cwd=self._dir, **kwargs)
 
     def get_feedback(self, stderr, result, process):
@@ -123,6 +127,10 @@ class JavaExecutor(CompiledExecutor):
     @classmethod
     def get_vm(cls):
         return cls.runtime_dict.get(cls.vm)
+
+    @classmethod
+    def get_vm_mode(cls):
+        return '-%s' % cls.runtime_dict.get(cls.vm + '_mode', 'client')
 
     @classmethod
     def get_compiler(cls):
@@ -193,16 +201,18 @@ class JavaExecutor(CompiledExecutor):
 class JavacExecutor(JavaExecutor):
     def create_files(self, problem_id, source_code, *args, **kwargs):
         super(JavacExecutor, self).create_files(problem_id, source_code, *args, **kwargs)
-        source_code = deunicode(source_code)
+        # This step is necessary because of Unicode classnames
+        try:
+            source_code = utf8text(source_code)
+        except UnicodeDecodeError:
+            raise CompileError('Your UTF-8 is bad, and you should feel bad')
         class_name = find_class(source_code)
         self._code = self._file('%s.java' % class_name.group(1))
         try:
             with open(self._code, 'wb') as fo:
-                if isinstance(source_code, unicode):
-                    source_code.encode('utf-8')
-                fo.write(source_code)
+                fo.write(utf8bytes(source_code))
         except IOError as e:
-            if e.errno in (errno.ENAMETOOLONG, errno.ENOENT):
+            if e.errno in (errno.ENAMETOOLONG, errno.ENOENT, errno.EINVAL):
                 raise CompileError('Why do you need a class name so long? '
                                    'As a judge, I sentence your code to death.\n')
             raise
@@ -212,7 +222,7 @@ class JavacExecutor(JavaExecutor):
         return [self.get_compiler(), '-Xlint', '-encoding', 'UTF-8', self._code]
 
     def handle_compile_error(self, output):
-        if 'is public, should be declared in a file named' in output:
+        if b'is public, should be declared in a file named' in output:
             raise CompileError('You are a troll. Trolls are not welcome. '
                                'As a judge, I sentence your code to death.\n')
         raise CompileError(output)
@@ -221,11 +231,26 @@ class JavacExecutor(JavaExecutor):
     def test_jvm(cls, name, path):
         vm_path = os.path.join(path, 'bin', 'java')
         compiler_path = os.path.join(path, 'bin', 'javac')
-        result = {cls.vm: vm_path, cls.compiler: compiler_path}
 
         if os.path.isfile(vm_path) and os.path.isfile(compiler_path):
-            executor = type('Executor', (cls,), {'runtime_dict': result})
-            success = executor.run_self_test(output=False)
-            return result, success, 'Using %s' % vm_path if success else 'Failed self-test'
+            # Not all JVMs have the same VMs available; specifically,
+            # OpenJDK for ARM has no client VM, but has dcevm+server. So, we test
+            # a bunch and if it's not the default (-client), then we list it
+            # in the config.
+            vm_modes = ['client', 'server', 'dcevm', 'zero']
+            cls_vm_mode = cls.vm + '_mode'
+            for mode in vm_modes:
+                result = {cls.vm: vm_path, cls_vm_mode: mode, cls.compiler: compiler_path}
+
+                executor = type('Executor', (cls,), {'runtime_dict': result})
+                success = executor.run_self_test(output=False)
+                if success:
+                    # Don't pollute the YAML in the usual case where it's -client
+                    if mode == 'client':
+                        del result[cls_vm_mode]
+                    return result, success, 'Using %s (%s VM)' % (vm_path, mode)
+            else:
+                # If absolutely no VM mode works, then we've failed the self test
+                return result, False, 'Failed self-test'
         else:
-            return result, False, 'Invalid JDK'
+            return {}, False, 'Invalid JDK'

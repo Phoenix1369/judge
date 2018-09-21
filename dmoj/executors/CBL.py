@@ -8,6 +8,7 @@ class Executor(CompiledExecutor):
     name = 'CBL'
     command = 'cobc'
     address_grace = 131072
+    compile_output_index = 0
     test_program = '''\
 	IDENTIFICATION DIVISION.
 	PROGRAM-ID. HELLO-WORLD.
@@ -17,11 +18,11 @@ class Executor(CompiledExecutor):
 '''
 
     def get_compile_args(self):
-        return [self.get_command(), '-x', self._code]
+        return [self.get_command(), '-x', '-free', self._code]
 
     def get_compile_popen_kwargs(self):
-        return {'stdout': subprocess.PIPE, 'stderr': None}
+        return {'stdout': subprocess.PIPE, 'stderr': subprocess.STDOUT}
 
     def get_compile_output(self, process):
-        output = process.communicate()[0]
-        return output if 'Error:' in output or 'Note:' in output or 'Warning:' in output else None
+        output = super(Executor, self).get_compile_output(process)
+        return output if b'Error:' in output or b'Note:' in output or b'Warning:' in output else ''

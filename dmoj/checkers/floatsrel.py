@@ -1,8 +1,12 @@
-def check(process_output, judge_output, precision, **kwargs):
-    from itertools import izip
+from re import split as resplit
 
-    process_lines = filter(None, process_output.split('\n'))
-    judge_lines = filter(None, judge_output.split('\n'))
+from six.moves import zip, filter
+
+from dmoj.utils.unicode import utf8bytes
+
+def check(process_output, judge_output, precision, **kwargs):
+    process_lines = list(filter(None, resplit(b'[\r\n]', utf8bytes(process_output))))
+    judge_lines = list(filter(None, resplit(b'[\r\n]', utf8bytes(judge_output))))
 
     if len(process_lines) != len(judge_lines):
         return False
@@ -10,14 +14,14 @@ def check(process_output, judge_output, precision, **kwargs):
     epsilon = 10 ** -int(precision)
 
     try:
-        for process_line, judge_line in izip(process_lines, judge_lines):
+        for process_line, judge_line in zip(process_lines, judge_lines):
             process_tokens = process_line.split()
             judge_tokens = judge_line.split()
-            
+
             if len(process_tokens) != len(judge_tokens):
                 return False
-            
-            for process_token, judge_token in izip(process_tokens, judge_tokens):
+
+            for process_token, judge_token in zip(process_tokens, judge_tokens):
                 try:
                     judge_float = float(judge_token)
                 except:
@@ -25,8 +29,10 @@ def check(process_output, judge_output, precision, **kwargs):
                         return False
                 else:
                     process_float = float(process_token)
-                    if ((abs(judge_float) < epsilon <= abs(process_float)) or
-                            (abs(judge_float) >= epsilon and abs(1.0 - process_float / judge_float) > epsilon)):
+                    p1 = min(judge_float * (1 - epsilon), judge_float * (1 + epsilon))
+                    p2 = max(judge_float * (1 - epsilon), judge_float * (1 + epsilon))
+                    # since process_float can be nan, this is NOT equivalent to (process_float < p1 or process_float > p2)
+                    if not (p1 <= process_float <= p2):
                         return False
     except:
         return False

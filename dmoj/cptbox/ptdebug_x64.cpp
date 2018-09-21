@@ -1,11 +1,13 @@
+#define _DEFAULT_SOURCE
 #define _BSD_SOURCE
+#include "ptbox.h"
 
+#ifdef HAS_DEBUGGER_X64
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ptrace.h>
-#include "ptbox.h"
 
 #define R15 0
 #define R14 1
@@ -40,7 +42,11 @@ int pt_debugger_x64::syscall() {
 }
 
 void pt_debugger_x64::syscall(int id) {
+#if PTBOX_FREEBSD
+    poke_reg(RAX, id);
+#else
     poke_reg(ORIG_RAX, id);
+#endif
 }
 
 long pt_debugger_x64::result() {
@@ -88,3 +94,4 @@ int pt_debugger_x64::getpid_syscall() {
 pt_debugger_x64::pt_debugger_x64() {
     execve_id = 59;
 }
+#endif /* HAS_DEBUGGER_X64 */

@@ -1,8 +1,9 @@
-#include "process.h"
+#include "wbox.h"
 #include "handles.h"
 #include <objbase.h>
 #include <strsafe.h>
 #include <VersionHelpers.h>
+#include <stdint.h>
 
 bool JobbedProcessManager::canX86 = false;
 bool JobbedProcessManager::canX64 = false;
@@ -134,6 +135,7 @@ bool JobbedProcessManager::inject(HANDLE hProcess, BOOL x64, LPCWSTR szDllPath, 
 		return false;
 
 	WaitForSingleObject(hInject, INFINITE);
+	CloseHandle(hInject);
 
 	VirtualFreeEx(hProcess, lpDllPath, cbDllPath, MEM_RELEASE);
 	VirtualFreeEx(hProcess, lpFunctionName, cbFunctionName, MEM_RELEASE);

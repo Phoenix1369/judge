@@ -2,8 +2,7 @@ import os
 
 from .base_executor import CompiledExecutor
 
-
-CARGO_TOML = '''\
+CARGO_TOML = b'''\
 [package]
 name = "user_submission"
 version = "1.0.0"
@@ -13,7 +12,7 @@ dmoj = "0.1"
 rand = "0.3"
 '''
 
-CARGO_LOCK = '''\
+CARGO_LOCK = b'''\
 [root]
 name = "user_submission"
 version = "1.0.0"
@@ -70,6 +69,7 @@ class Executor(CompiledExecutor):
     name = 'RUST'
     command = 'cargo'
     test_program = HELLO_WORLD_PROGRAM
+    compiler_time_limit = 20
 
     def create_files(self, problem_id, source_code, *args, **kwargs):
         os.mkdir(self._file('src'))

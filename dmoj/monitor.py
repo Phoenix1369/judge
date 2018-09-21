@@ -1,10 +1,13 @@
-import traceback
+from __future__ import print_function
+
+import logging
 from contextlib import closing
 from threading import Thread, Event
-from urllib2 import urlopen
+
+from six.moves.urllib.request import urlopen
 
 from dmoj import judgeenv
-from dmoj.judgeenv import startup_warnings, get_problem_roots
+from dmoj.judgeenv import startup_warnings, get_problem_watches
 from dmoj.utils.ansi import ansi_style
 
 try:
@@ -13,6 +16,8 @@ try:
 except ImportError:
     startup_warnings.append('watchdog module not found, install it to automatically update problems')
     Observer = None
+
+logger = logging.getLogger(__name__)
 
 
 class RefreshWorker(Thread):
@@ -36,12 +41,14 @@ class RefreshWorker(Thread):
             self._trigger.clear()
             if self._terminate:
                 break
+
             for url in self.urls:
+                logger.info('Pinging for problem update: %s', url)
                 try:
                     with closing(urlopen(url, data='')) as f:
                         f.read()
                 except Exception:
-                    traceback.print_exc()
+                    logger.exception('Failed to ping for problem update: %s', url)
 
 
 class SendProblemsHandler(FileSystemEventHandler):
@@ -60,14 +67,16 @@ class Monitor(object):
     def __init__(self):
         if Observer is not None and not judgeenv.no_watchdog:
             if 'update_pings' in judgeenv.env:
+                logger.info('Using thread to ping urls: %r', judgeenv.env['update_pings'])
                 self._refresher = RefreshWorker(judgeenv.env['update_pings'])
             else:
                 self._refresher = None
 
             self._handler = SendProblemsHandler(self._refresher)
             self._monitor = monitor = Observer()
-            for dir in get_problem_roots():
+            for dir in get_problem_watches():
                 monitor.schedule(self._handler, dir, recursive=True)
+                logger.info('Scheduled for monitoring: %s', dir)
         else:
             self._monitor = None
             self._refresher = None
@@ -82,14 +91,16 @@ class Monitor(object):
 
     @callback.setter
     def callback(self, callback):
-        self._handler.callback = callback
+        if self._monitor is not None:
+            self._handler.callback = callback
 
     def start(self):
         if self._monitor is not None:
             try:
                 self._monitor.start()
             except OSError:
-                print ansi_style('#ansi[Warning: failed to start problem monitor!](yellow)')
+                logger.exception('Failed to start problem monitor.')
+                print(ansi_style('#ansi[Warning: failed to start problem monitor!](yellow)'))
         if self._refresher is not None:
             self._refresher.start()
 

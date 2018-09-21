@@ -1,13 +1,19 @@
+from __future__ import print_function
+
 import gc
+import logging
 import os
 import platform
 import signal
+
+import six
 
 from dmoj.error import CompileError
 from dmoj.executors import executors
 from dmoj.graders.base import BaseGrader
 from dmoj.result import Result, CheckerResult
 from dmoj.utils.communicate import OutputLimitExceeded
+from dmoj.utils.error import print_protection_fault
 
 try:
     from dmoj.utils.nixutils import strsignal
@@ -17,6 +23,8 @@ except ImportError:
     except ImportError:
         strsignal = lambda x: 'signal %s' % x
 
+log = logging.getLogger('dmoj.graders')
+
 
 class StandardGrader(BaseGrader):
     def grade(self, case):
@@ -25,8 +33,7 @@ class StandardGrader(BaseGrader):
         input = case.input_data()  # cache generator data
 
         self._current_proc = self.binary.launch(time=self.problem.time_limit, memory=self.problem.memory_limit,
-                                                pipe_stderr=True, unbuffered=case.config.unbuffered,
-                                                io_redirects=case.io_redirects(),
+                                                pipe_stderr=True, io_redirects=case.io_redirects(),
                                                 wall_time=case.config.wall_time_factor * self.problem.time_limit)
 
         error = self._interact_with_process(case, result, input)
@@ -79,7 +86,8 @@ class StandardGrader(BaseGrader):
 
         # On Linux we can provide better help messages
         if hasattr(process, 'protection_fault') and process.protection_fault:
-            sigid, callname = process.protection_fault
+            syscall, callname, args = process.protection_fault
+            print_protection_fault(process.protection_fault)
             callname = callname.replace('sys_', '', 1)
             message = {
                 'open': 'opening files is not allowed',
@@ -93,14 +101,15 @@ class StandardGrader(BaseGrader):
         # See https://github.com/DMOJ/judge/issues/170
         if not result.result_flag:
             # Checkers might crash if any data is None, so force at least empty string
-            check = case.checker()(result.proc_output or '',
-                                   case.output_data() or '',
+            check = case.checker()(result.proc_output or b'',
+                                   case.output_data() or b'',
                                    submission_source=self.source,
-                                   judge_input=case.input_data() or '',
+                                   judge_input=case.input_data() or b'',
                                    point_value=case.points,
                                    case_position=case.position,
                                    batch=case.batch,
-                                   submission_language=self.language)
+                                   submission_language=self.language,
+                                   binary_data=case.has_binary_data)
         else:
             # Solution is guaranteed to receive 0 points
             check = False
@@ -123,7 +132,7 @@ class StandardGrader(BaseGrader):
         if process.returncode < 0:
             # None < 0 == True
             # if process.returncode is not None:
-            # print>> sys.stderr, 'Killed by signal %d' % -process.returncode
+            # print('Killed by signal %d' % -process.returncode, file=sys.stderr)
             result.result_flag |= Result.RTE  # Killed by signal
         if process.tle:
             result.result_flag |= Result.TLE
@@ -137,7 +146,7 @@ class StandardGrader(BaseGrader):
                                                                  errlimit=1048576)
         except OutputLimitExceeded as ole:
             stream, result.proc_output, error = ole.args
-            print 'OLE:', stream
+            log.warning('OLE on stream: %s', stream)
             result.result_flag |= Result.OLE
             try:
                 process.kill()
@@ -156,11 +165,12 @@ class StandardGrader(BaseGrader):
         try:
             # Fetch an appropriate executor for the language
             binary = executors[self.language].Executor(self.problem.id, self.source,
-                                                       hints=self.problem.config.hints or [])
+                                                       hints=self.problem.config.hints or [],
+                                                       unbuffered=self.problem.config.unbuffered)
         except CompileError as compilation_error:
             error = compilation_error.args[0]
-            error = error.decode('mbcs') if os.name == 'nt' and isinstance(error, str) else error
-            self.judge.packet_manager.compile_error_packet(ansi.format_ansi(error or ''))
+            error = error.decode('mbcs') if os.name == 'nt' and isinstance(error, six.binary_type) else error
+            self.judge.packet_manager.compile_error_packet(ansi.format_ansi(error or 'compiler exited abnormally'))
 
             # Compile error is fatal
             raise
